@@ -12,6 +12,7 @@ import { paymentInvitation } from '../src/runtime/communication.ts';
 import { PrivateEntryWorkspace, usePrivateEntry } from '../src/web/components/private-entry.tsx';
 import { VaultItemForm } from '../src/web/components/vault-item-form.tsx';
 import { VaultDetails } from '../src/web/components/vault-details.tsx';
+import { VaultSurface } from '../src/web/components/vault-surface.tsx';
 import { pageDataCache } from '../src/web/lib/page-data-cache.ts';
 import { Composio } from '@composio/core';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -6248,5 +6249,69 @@ test('route analytics stay in the consent period that accepted the request', asy
     for (const held of requests.values()) held.released.resolve();
     await app.close();
     await analytics.shutdown();
+  }
+});
+
+test('a vault surface stays open when Escape cancels an IME candidate', async () => {
+  let closed = 0;
+  const view = await vaultPage(
+    createElement(VaultSurface, {
+      label: 'Test surface',
+      onClose: () => closed++,
+      children: createElement('input', { 'aria-label': 'entry name' }),
+    }),
+    async (path) => {
+      throw new Error(`unexpected fetch: ${path}`);
+    },
+    'http://localhost:4310/vault',
+  );
+  try {
+    const input = view.document.querySelector('input')!;
+    for (const composing of [{ isComposing: true }, { keyCode: 229 }]) {
+      await act(async () => {
+        input.dispatchEvent(
+          new view.document.defaultView!.KeyboardEvent('keydown', {
+            key: 'Escape',
+            bubbles: true,
+            cancelable: true,
+            ...composing,
+          }),
+        );
+      });
+      assert.equal(closed, 0, `surface closed with ${JSON.stringify(composing)}`);
+      assert.ok(input.isConnected, 'the edited field is still on the page');
+    }
+  } finally {
+    await view.close();
+  }
+});
+
+test('a vault surface still closes on Escape outside a composition', async () => {
+  let closed = 0;
+  const view = await vaultPage(
+    createElement(VaultSurface, {
+      label: 'Test surface',
+      onClose: () => closed++,
+      children: createElement('input', { 'aria-label': 'entry name' }),
+    }),
+    async (path) => {
+      throw new Error(`unexpected fetch: ${path}`);
+    },
+    'http://localhost:4310/vault',
+  );
+  try {
+    const input = view.document.querySelector('input')!;
+    await act(async () => {
+      input.dispatchEvent(
+        new view.document.defaultView!.KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    assert.equal(closed, 1);
+  } finally {
+    await view.close();
   }
 });
